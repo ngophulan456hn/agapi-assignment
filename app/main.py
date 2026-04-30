@@ -4,8 +4,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
+from app.core.middleware import AuthMiddleware
 from app.core.redis import close_redis, get_redis
-from app.routers import auth, flash_sale
+from app.routers import auth, flash_sale, product, user
 
 
 @asynccontextmanager
@@ -31,9 +32,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(AuthMiddleware)
 
 app.include_router(auth.router)
+app.include_router(product.router)
 app.include_router(flash_sale.router)
+app.include_router(user.router)
 
 
 @app.get("/health", tags=["Health"])

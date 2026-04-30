@@ -33,6 +33,49 @@ services:
       timeout: 5s
       retries: 5
 
+  celery_worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: fastapi_celery_worker
+    restart: unless-stopped
+    command: celery -A app.core.celery_app.celery_app worker --loglevel=info
+      --concurrency=4
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: postgres
+      REDIS_HOST: redis
+    volumes:
+      - backup_data:/app/backup
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  celery_beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: fastapi_celery_beat
+    restart: unless-stopped
+    command: celery -A app.core.celery_app.celery_app beat --loglevel=info
+      --scheduler celery.beat.PersistentScheduler
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: postgres
+      REDIS_HOST: redis
+    volumes:
+      - backup_data:/app/backup
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
 volumes:
   postgres_data:
   redis_data:
+  backup_data:

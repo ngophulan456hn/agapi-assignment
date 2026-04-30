@@ -21,6 +21,11 @@ class FlashSale(Base):
     __tablename__ = "flash_sales"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    product_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("products.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
     name = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
     original_price = Column(Numeric(10, 2), nullable=False)
@@ -43,6 +48,7 @@ class FlashSale(Base):
         nullable=False,
     )
 
+    product = relationship("Product", back_populates="flash_sales")
     created_by_user = relationship("User", back_populates="created_flash_sales")
     purchases = relationship(
         "FlashSalePurchase",

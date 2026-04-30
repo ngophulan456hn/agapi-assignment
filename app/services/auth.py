@@ -9,6 +9,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.deps import BLACKLIST_PREFIX, REFRESH_TOKEN_PREFIX
+from app.core.otp import (
+    OTP_TTL_SECONDS,
+    detect_identifier_type,
+    generate_otp,
+    otp_redis_key,
+)
 from app.core.security import (
     create_access_token,
     create_refresh_token,
@@ -25,16 +31,14 @@ class AuthService:
         self.db = db
         self.redis = redis
 
-    async def register(self, user_data: UserCreate) -> User:
-        result = await self.db.execute(
-            select(User).where(User.email == user_data.email)
-        )
-        if result.scalar_one_or_none():
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Email already registered",
-            )
+    # ------------------------------------------------------------------ #
+    # Registration
+    # ------------------------------------------------------------------ #
 
+    async def register(self, user_data: UserCreate) -> User:
+        identifier_type = detect_identifier_type(user_data.identifier)
+
+        # Username uniqueness
         result = await self.db.execute(
             select(User).where(User.username == user_data.username)
         )
@@ -44,24 +48,66 @@ class AuthService:
                 detail="Username already taken",
             )
 
-        user = User(
-            email=user_data.email,
-            username=user_data.username,
-            hashed_password=hash_password(user_data.password),
-        )
+        # Identifier uniqueness + build user
+        if identifier_type == "email":
+            result = await self.db.execute(
+                select(User).where(User.email == user_data.identifier)
+            )
+            if result.scalar_one_or_none():
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Email already registered",
+                )
+            user = User(
+                email=user_data.identifier,
+                username=user_data.username,
+                hashed_password=hash_password(user_data.password),
+            )
+        else:
+            result = await self.db.execute(
+                select(User).where(User.phone_number == user_data.identifier)
+            )
+            if result.scalar_one_or_none():
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Phone number already registered",
+                )
+            user = User(
+                phone_number=user_data.identifier,
+                username=user_data.username,
+                hashed_password=hash_password(user_data.password),
+            )
+
         self.db.add(user)
         await self.db.flush()
         await self.db.refresh(user)
         return user
 
-    async def login(self, email: str, password: str) -> dict:
-        result = await self.db.execute(select(User).where(User.email == email))
+    # ------------------------------------------------------------------ #
+    # Login
+    # ------------------------------------------------------------------ #
+
+    async def login(self, identifier: str, password: str) -> dict:
+        try:
+            identifier_type = detect_identifier_type(identifier)
+        except ValueError as e:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=str(e),
+            )
+
+        if identifier_type == "email":
+            result = await self.db.execute(select(User).where(User.email == identifier))
+        else:
+            result = await self.db.execute(
+                select(User).where(User.phone_number == identifier)
+            )
         user = result.scalar_one_or_none()
 
         if not user or not verify_password(password, user.hashed_password):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Incorrect email or password",
+                detail="Incorrect identifier or password",
             )
         if not user.is_active:
             raise HTTPException(
@@ -83,6 +129,10 @@ class AuthService:
             "refresh_token": refresh_token,
             "token_type": "bearer",
         }
+
+    # ------------------------------------------------------------------ #
+    # Logout / Refresh
+    # ------------------------------------------------------------------ #
 
     async def logout(self, access_token: str, user_id: UUID) -> None:
         # Blacklist the access token for its remaining TTL
@@ -143,3 +193,84 @@ class AuthService:
             "refresh_token": new_refresh_token,
             "token_type": "bearer",
         }
+
+    # ------------------------------------------------------------------ #
+    # OTP
+    # ------------------------------------------------------------------ #
+
+    async def send_otp(self, identifier: str) -> str:
+        """
+        Generate a 6-digit OTP, store it in Redis (TTL: 5 min), and return it.
+        In production: deliver via email (SMTP/SendGrid) or SMS (Twilio) instead
+        of returning the value in the API response.
+        """
+        identifier_type = detect_identifier_type(identifier)
+
+        if identifier_type == "email":
+            result = await self.db.execute(select(User).where(User.email == identifier))
+        else:
+            result = await self.db.execute(
+                select(User).where(User.phone_number == identifier)
+            )
+        user = result.scalar_one_or_none()
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No account found for this identifier",
+            )
+        if not user.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Account is inactive",
+            )
+
+        otp = generate_otp()
+        key = otp_redis_key(identifier_type, identifier)
+        await self.redis.setex(key, OTP_TTL_SECONDS, otp)
+
+        # TODO (production): send `otp` via email or SMS — do NOT return it here
+        return otp
+
+    async def verify_otp(self, identifier: str, otp: str) -> User:
+        """
+        Validate OTP (single-use) and mark the user's email or phone as verified.
+        """
+        identifier_type = detect_identifier_type(identifier)
+        key = otp_redis_key(identifier_type, identifier)
+
+        stored_otp = await self.redis.get(key)
+        if stored_otp is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="OTP expired or not found. Please request a new one.",
+            )
+        if stored_otp != otp:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid OTP",
+            )
+
+        # Consume OTP immediately (single-use)
+        await self.redis.delete(key)
+
+        if identifier_type == "email":
+            result = await self.db.execute(select(User).where(User.email == identifier))
+        else:
+            result = await self.db.execute(
+                select(User).where(User.phone_number == identifier)
+            )
+        user = result.scalar_one_or_none()
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No account found for this identifier",
+            )
+
+        if identifier_type == "email":
+            user.is_email_verified = True
+        else:
+            user.is_phone_verified = True
+
+        await self.db.flush()
+        await self.db.refresh(user)
+        return user

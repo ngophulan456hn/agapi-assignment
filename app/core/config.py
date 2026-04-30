@@ -29,6 +29,31 @@ class Settings(BaseSettings):
     REDIS_PASSWORD: Optional[str] = None
     REDIS_DB: int = 0
 
+    # Celery (uses Redis DB 1 so it doesn't collide with the app cache on DB 0)
+    CELERY_BROKER_DB: int = 1
+    CELERY_BACKEND_DB: int = 2
+
+    # Database backups
+    BACKUP_DIR: str = "backup"
+
+    @property
+    def CELERY_BROKER_URL(self) -> str:
+        if self.REDIS_PASSWORD:
+            return (
+                f"redis://:{self.REDIS_PASSWORD}"
+                f"@{self.REDIS_HOST}:{self.REDIS_PORT}/{self.CELERY_BROKER_DB}"
+            )
+        return f"redis://{self.REDIS_HOST}:{self.REDIS_PORT}/{self.CELERY_BROKER_DB}"
+
+    @property
+    def CELERY_BACKEND_URL(self) -> str:
+        if self.REDIS_PASSWORD:
+            return (
+                f"redis://:{self.REDIS_PASSWORD}"
+                f"@{self.REDIS_HOST}:{self.REDIS_PORT}/{self.CELERY_BACKEND_DB}"
+            )
+        return f"redis://{self.REDIS_HOST}:{self.REDIS_PORT}/{self.CELERY_BACKEND_DB}"
+
     @property
     def DATABASE_URL(self) -> str:
         return (

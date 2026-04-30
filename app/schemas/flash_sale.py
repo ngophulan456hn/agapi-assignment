@@ -7,9 +7,9 @@ from pydantic import BaseModel, field_validator, model_validator
 
 
 class FlashSaleCreate(BaseModel):
+    product_id: uuid.UUID
     name: str
     description: Optional[str] = None
-    original_price: Decimal
     sale_price: Decimal
     total_stock: int
     start_time: datetime
@@ -22,7 +22,7 @@ class FlashSaleCreate(BaseModel):
             raise ValueError("Total stock must be positive")
         return v
 
-    @field_validator("original_price", "sale_price")
+    @field_validator("sale_price")
     @classmethod
     def price_positive(cls, v: Decimal) -> Decimal:
         if v <= 0:
@@ -39,7 +39,6 @@ class FlashSaleCreate(BaseModel):
 class FlashSaleUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
-    original_price: Optional[Decimal] = None
     sale_price: Optional[Decimal] = None
     is_active: Optional[bool] = None
     start_time: Optional[datetime] = None
@@ -48,6 +47,7 @@ class FlashSaleUpdate(BaseModel):
 
 class FlashSaleResponse(BaseModel):
     id: uuid.UUID
+    product_id: uuid.UUID
     name: str
     description: Optional[str]
     original_price: Decimal

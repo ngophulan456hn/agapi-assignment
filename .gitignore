@@ -29,6 +29,10 @@ ENV/
 *.log
 logs/
 
+# Database backups
+backup/
+*.dump
+
 # OS
 .DS_Store
 Thumbs.db

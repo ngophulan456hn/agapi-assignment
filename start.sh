@@ -36,6 +36,7 @@ POSTGRES_DB="${POSTGRES_DB:-fastapi_db}"
 
 REDIS_HOST="${REDIS_HOST:-localhost}"
 REDIS_PORT="${REDIS_PORT:-6379}"
+CELERY_BROKER_DB="${CELERY_BROKER_DB:-1}"
 
 MAX_RETRIES=10
 RETRY_INTERVAL=3   # seconds
@@ -94,7 +95,38 @@ if [ -n "${REDIS_PASSWORD:-}" ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# 3. Run Alembic migrations
+# 3. Check Celery Broker (Redis DB used by Celery)
+# ---------------------------------------------------------------------------
+log_info "Checking Celery broker connection (Redis DB ${CELERY_BROKER_DB})..."
+
+REDIS_AUTH_ARGS=()
+if [ -n "${REDIS_PASSWORD:-}" ]; then
+    REDIS_AUTH_ARGS=(-a "$REDIS_PASSWORD")
+fi
+
+if ! redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" "${REDIS_AUTH_ARGS[@]}" \
+        -n "$CELERY_BROKER_DB" ping > /dev/null 2>&1; then
+    log_error "Cannot reach Celery broker (Redis DB ${CELERY_BROKER_DB}). Aborting."
+    exit 1
+fi
+log_info "Celery broker is reachable."
+
+# ---------------------------------------------------------------------------
+# 4. Celery Worker Health Check (best-effort — warns but does not block)
+# ---------------------------------------------------------------------------
+log_info "Pinging Celery workers..."
+CELERY_WORKER_TIMEOUT="${CELERY_WORKER_TIMEOUT:-5}"
+
+if celery -A app.core.celery_app.celery_app inspect ping \
+        --timeout "$CELERY_WORKER_TIMEOUT" > /dev/null 2>&1; then
+    log_info "At least one Celery worker responded."
+else
+    log_warn "No Celery workers responded within ${CELERY_WORKER_TIMEOUT}s. " \
+             "Workers may not be running yet — the app will start anyway."
+fi
+
+# ---------------------------------------------------------------------------
+# 5. Run Alembic migrations
 # ---------------------------------------------------------------------------
 log_info "Running database migrations (alembic upgrade head)..."
 if ! alembic upgrade head; then
@@ -104,7 +136,16 @@ fi
 log_info "Database is up to date."
 
 # ---------------------------------------------------------------------------
-# 4. Start the backend
+# 6. Seed the database
+# ---------------------------------------------------------------------------
+log_info "Running database seed (python scripts/seed.py)..."
+if ! python scripts/seed.py; then
+    log_error "Database seeding failed. Aborting."
+    exit 1
+fi
+
+# ---------------------------------------------------------------------------
+# 7. Start the backend
 # ---------------------------------------------------------------------------
 log_info "Starting FastAPI with uvicorn..."
 exec uvicorn app.main:app --reload
