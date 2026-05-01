@@ -104,7 +104,8 @@ if [ -n "${REDIS_PASSWORD:-}" ]; then
     REDIS_AUTH_ARGS=(-a "$REDIS_PASSWORD")
 fi
 
-if ! redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" "${REDIS_AUTH_ARGS[@]}" \
+if ! redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" \
+        ${REDIS_AUTH_ARGS[@]+"${REDIS_AUTH_ARGS[@]}"} \
         -n "$CELERY_BROKER_DB" ping > /dev/null 2>&1; then
     log_error "Cannot reach Celery broker (Redis DB ${CELERY_BROKER_DB}). Aborting."
     exit 1

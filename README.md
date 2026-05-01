@@ -50,13 +50,21 @@ agapi-assignment/
 │   │   ├── flash_sale.py     # /flash-sales/*
 │   │   └── user.py           # /users/*
 │   ├── tasks/
-│   │   └── flash_sale_tasks.py  # Celery task: post-sale stock sync
+│   │   ├── flash_sale_tasks.py  # Celery task: post-sale stock sync
+│   │   └── backup_tasks.py      # Celery beat task: daily pg_dump database backup
 │   └── main.py               # App factory, middleware, lifespan, router registration
 ├── alembic/                  # Database migration scripts
 ├── scripts/
 │   └── seed.py               # Seed 1 admin account + 10 products
-├── docker-compose.yml        # PostgreSQL + Redis + Celery worker services
+├── tests/
+│   ├── conftest.py           # Shared pytest fixtures (DB, Redis, user, admin, product)
+│   ├── test_auth_service.py  # Auth service tests (register, login, logout, OTP, refresh)
+│   ├── test_flash_sale_service.py  # Flash sale tests (CRUD, purchase, overlap guard)
+│   ├── test_product_service.py     # Product CRUD tests
+│   └── test_user_service.py        # User balance top-up tests
+├── docker-compose.yml        # PostgreSQL + Redis + Celery worker/beat services
 ├── Dockerfile                # Single image for API and Celery worker
+├── pytest.ini                # pytest-asyncio auto mode configuration
 ├── start.sh                  # Health checks → migrations → seed → uvicorn
 ├── requirements.txt
 └── .env.example

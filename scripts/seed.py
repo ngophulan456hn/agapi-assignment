@@ -23,7 +23,7 @@ from sqlalchemy.orm import sessionmaker
 # ---------------------------------------------------------------------------
 # Bootstrap the app config so DATABASE_URL is available.
 # ---------------------------------------------------------------------------
-sys.path.insert(0, os.path.dirname(__file__))
+sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from app.core.config import settings  # noqa: E402
 from app.core.security import hash_password  # noqa: E402
@@ -143,7 +143,9 @@ async def seed_products(session: AsyncSession) -> None:
             stock=data["stock"],
         )
         session.add(product)
-        print(f"  [CREATE] Product: {data['name']}  (stock={data['stock']}, price={data['price']})")
+        print(
+            f"  [CREATE] Product: {data['name']}  (stock={data['stock']}, price={data['price']})"
+        )
 
 
 async def run() -> None:
